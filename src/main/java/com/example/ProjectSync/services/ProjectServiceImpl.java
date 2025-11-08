@@ -1,20 +1,23 @@
 package com.example.ProjectSync.services;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.example.ProjectSync.models.dtos.CreateProjectDTO;
 import com.example.ProjectSync.models.dtos.ProjectResponseDTO;
 import com.example.ProjectSync.models.dtos.UpdateProjectDTO;
 import com.example.ProjectSync.models.entities.Project;
 import com.example.ProjectSync.repositories.ProjectRepository;
 import com.example.ProjectSync.util.exceptions.BadRequestException;
+import com.example.ProjectSync.util.exceptions.ConflictException;
 import com.example.ProjectSync.util.exceptions.DatabaseException;
 import com.example.ProjectSync.util.exceptions.ResourceNotFoundException;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import com.example.ProjectSync.util.exceptions.UnprocessableEntityException;
 
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
 
 /**
  * ProjectServiceImpl - implements business logic for Project operations.
@@ -111,8 +114,11 @@ public class ProjectServiceImpl implements ProjectService {
     @Override
     public ProjectResponseDTO createProject(CreateProjectDTO createProjectDTO) {
         try {
-            // Validate status
+            // Validate status (400 Bad Request)
             validateStatus(createProjectDTO.getStatus());
+
+            // Semantic validation - project name cannot contain restricted keywords (422 Unprocessable Entity)
+            validateProjectNameSemantics(createProjectDTO.getName());
 
             // Create new project entity
             Project project = new Project();
@@ -124,7 +130,7 @@ public class ProjectServiceImpl implements ProjectService {
             // Save to database
             Project savedProject = projectRepository.save(project);
             return mapToResponseDTO(savedProject);
-        } catch (BadRequestException ex) {
+        } catch (BadRequestException | UnprocessableEntityException ex) {
             throw ex;
         } catch (Exception ex) {
             throw new DatabaseException("Failed to create project: " + ex.getMessage(), ex);
@@ -138,12 +144,15 @@ public class ProjectServiceImpl implements ProjectService {
                 throw new BadRequestException("Project ID must be a positive number");
             }
 
-            // Validate status
+            // Validate status (400 Bad Request)
             validateStatus(updateProjectDTO.getStatus());
 
             // Find existing project
             Project project = projectRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found with ID: " + id));
+
+            // Business rule: prevent status transitions that violate state machine (409 Conflict)
+            validateStatusTransition(project.getStatus(), updateProjectDTO.getStatus());
 
             // Update fields
             project.setName(updateProjectDTO.getName());
@@ -154,7 +163,7 @@ public class ProjectServiceImpl implements ProjectService {
             // Save updated project
             Project updatedProject = projectRepository.save(project);
             return mapToResponseDTO(updatedProject);
-        } catch (ResourceNotFoundException | BadRequestException ex) {
+        } catch (ResourceNotFoundException | BadRequestException | ConflictException ex) {
             throw ex;
         } catch (Exception ex) {
             throw new DatabaseException("Failed to update project: " + ex.getMessage(), ex);
@@ -199,5 +208,40 @@ public class ProjectServiceImpl implements ProjectService {
      */
     private boolean isValidStatus(String status) {
         return status.equals("PENDING") || status.equals("IN_PROGRESS") || status.equals("COMPLETED");
+    }
+
+    /**
+     * Validates status transitions - prevents invalid state machine transitions (409 Conflict)
+     * Business Rule: A COMPLETED project cannot transition back to PENDING or IN_PROGRESS
+     */
+    private void validateStatusTransition(String currentStatus, String newStatus) {
+        if ("COMPLETED".equals(currentStatus) && ("PENDING".equals(newStatus) || "IN_PROGRESS".equals(newStatus))) {
+            throw new ConflictException(
+                "Cannot revert a COMPLETED project to " + newStatus + 
+                ". Completed projects cannot be reopened."
+            );
+        }
+    }
+
+    /**
+     * Validates project name semantics (422 Unprocessable Entity)
+     * Business Rule: Project names cannot contain restricted keywords
+     */
+    private void validateProjectNameSemantics(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return;
+        }
+        
+        String lowerName = name.toLowerCase();
+        String[] restrictedKeywords = {"test", "temp", "delete", "spam"};
+        
+        for (String keyword : restrictedKeywords) {
+            if (lowerName.contains(keyword)) {
+                throw new UnprocessableEntityException(
+                    "Project name contains restricted keyword: '" + keyword + 
+                    "'. Please choose a more descriptive name."
+                );
+            }
+        }
     }
 }

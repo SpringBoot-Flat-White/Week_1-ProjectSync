@@ -1,16 +1,29 @@
 package com.example.ProjectSync.controllers;
 
+import java.util.List;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.example.ProjectSync.models.dtos.CreateProjectDTO;
 import com.example.ProjectSync.models.dtos.ProjectResponseDTO;
 import com.example.ProjectSync.models.dtos.UpdateProjectDTO;
 import com.example.ProjectSync.services.ProjectService;
+import com.example.ProjectSync.util.exceptions.ForbiddenException;
+
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 /**
  * ProjectController - REST API endpoints for Project CRUD operations.
@@ -194,19 +207,36 @@ public class ProjectController {
      * Path Parameter:
      *   - id: The project ID
      *
+     * Request Header (Optional):
+     *   - X-User-Id: The ID of the user attempting to delete (used for permission checks)
+     *
      * Response Example:
      * HTTP 204 No Content
      *
-     * Error Response:
+     * Error Response (Not Found):
      * HTTP 404 Not Found
      * {
      *   "status": 404,
      *   "message": "Project not found with ID: 999",
      *   "timestamp": "2025-10-27T10:35:00"
      * }
+     *
+     * Error Response (Forbidden):
+     * HTTP 403 Forbidden
+     * {
+     *   "status": 403,
+     *   "message": "You do not have permission to delete this project",
+     *   "timestamp": "2025-10-27T10:35:00"
+     * }
      */
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteProject(@PathVariable Long id) {
+    public ResponseEntity<Void> deleteProject(
+            @PathVariable Long id,
+            @RequestHeader(value = "X-User-Id", required = false) String userId) {
+        // Example permission check for 403 Forbidden demonstration
+        if (userId != null && "admin-user".equals(userId)) {
+            throw new ForbiddenException("You do not have permission to delete this project");
+        }
         projectService.deleteProject(id);
         return ResponseEntity.noContent().build();
     }
